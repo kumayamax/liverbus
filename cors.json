@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["http://localhost:3000", "https://livebus-297d6.web.app", "https://livebus-297d6.firebaseapp.com"],
+    "method": ["GET", "POST", "PUT", "DELETE", "HEAD"],
+    "maxAgeSeconds": 3600,
+    "responseHeader": ["Content-Type", "Authorization", "Content-Length", "User-Agent", "x-goog-resumable"]
+  }
+] 

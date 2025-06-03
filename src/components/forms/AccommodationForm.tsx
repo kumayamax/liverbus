@@ -102,11 +102,26 @@ const uploadImage = async (file: File): Promise<string> => {
     const timestamp = Date.now();
     const uniqueFileName = `${timestamp}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
     const storageRef = ref(storage, `accommodation_images/${uniqueFileName}`);
+    
+    console.log('开始上传图片:', file.name);
+    console.log('存储路径:', storageRef.fullPath);
+    
     // 上传
     const snapshot = await retryOperation(() => uploadBytes(storageRef, file));
+    console.log('图片上传成功:', file.name);
+    
     const downloadURL = await getDownloadURL(snapshot.ref);
+    console.log('获取下载URL成功:', downloadURL);
+    
     return downloadURL;
   } catch (error: any) {
+    console.error(`图片 ${file.name} 上传失败:`, error);
+    console.error('错误详情:', {
+      code: error.code,
+      message: error.message,
+      stack: error.stack
+    });
+    
     if (error.code === 'storage/unauthorized') {
       throw new Error('画像のアップロード権限がありません。ログインしてください。');
     } else if (error.code === 'storage/canceled') {
@@ -160,8 +175,32 @@ const AccommodationForm: React.FC = () => {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [toastOpen, setToastOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
+  const navigate = useNavigate();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // 检查登录状态
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        setIsAuthenticated(true);
+      } else {
+        setIsAuthenticated(false);
+        navigate('/login'); // 未登录时重定向到登录页面
+      }
+    });
+
+    return () => unsubscribe();
+  }, [navigate]);
+
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isAuthenticated) {
+      setError('ログインが必要です。');
+      setToastMsg('ログインが必要です。');
+      setToastOpen(true);
+      navigate('/login');
+      return;
+    }
+
     const files = e.target.files;
     if (!files) return;
     // 验证类型
@@ -271,23 +310,86 @@ const AccommodationForm: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!isAuthenticated) {
+      setError('ログインが必要です。');
+      setToastMsg('ログインが必要です。');
+      setToastOpen(true);
+      navigate('/login');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setSuccess('');
+
     try {
       let imageUrls: string[] = [];
+      
+      // 如果是更新操作，先删除旧的图片
+      if (selectedAccommodation) {
+        try {
+          const accDoc = await getDocs(query(collection(db, 'accommodations'), where('id', '==', selectedAccommodation)));
+          const oldAccData = accDoc.docs[0]?.data() as Accommodation;
+          if (oldAccData.images && oldAccData.images.length > 0) {
+            await deleteAllImages(oldAccData.images);
+          }
+        } catch (deleteError: any) {
+          console.error('删除旧图片失败:', deleteError);
+          if (deleteError.code === 'storage/unauthorized') {
+            setError('画像の削除権限がありません。');
+          } else {
+            setError('古い画像の削除に失敗しました。');
+          }
+          setToastMsg('古い画像の削除に失敗しました。');
+          setToastOpen(true);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 上传新图片
       if (images && images.length > 0) {
-        const uploadPromises = Array.from(images).map(async (file) => {
-          const uploadURL = await uploadImage(file);
-          return uploadURL;
-        });
-        imageUrls = await Promise.all(uploadPromises);
+        try {
+          // 显示上传进度
+          setToastMsg('画像をアップロード中...');
+          setToastOpen(true);
+
+          console.log('开始上传图片，总数:', images.length);
+          
+          // 逐个上传图片，避免并发问题
+          for (const file of Array.from(images)) {
+            try {
+              console.log('正在上传图片:', file.name);
+              const url = await uploadImage(file);
+              console.log('图片上传成功:', file.name, url);
+              imageUrls.push(url);
+            } catch (uploadError: any) {
+              console.error('单个图片上传失败:', file.name, uploadError);
+              // 继续上传其他图片，但记录错误
+              setError(prev => prev + `\n${uploadError.message}`);
+            }
+          }
+
+          console.log('所有图片上传完成，成功数量:', imageUrls.length);
+          
+          // 检查是否所有图片都上传成功
+          if (imageUrls.length === 0) {
+            throw new Error('すべての画像のアップロードに失敗しました。');
+          }
+        } catch (uploadError: any) {
+          console.error('图片上传失败:', uploadError);
+          setError('画像のアップロードに失敗しました。');
+          setToastMsg('画像のアップロードに失敗しました。');
+          setToastOpen(true);
+          setLoading(false);
+          return;
+        }
       }
 
       const user = auth.currentUser;
       if (!user) {
-        setError('ログインが必要です。');
-        return;
+        throw new Error('ログインが必要です。');
       }
 
       const accommodationData = {
@@ -305,26 +407,39 @@ const AccommodationForm: React.FC = () => {
         accommodationName: `${name} (${range?.from?.toLocaleDateString() || '未定'})`
       };
 
-      if (selectedAccommodation) {
-        await updateDoc(doc(db, 'accommodations', selectedAccommodation), accommodationData);
-        setToastMsg('更新成功！');
+      try {
+        if (selectedAccommodation) {
+          await updateDoc(doc(db, 'accommodations', selectedAccommodation), accommodationData);
+          setToastMsg('更新成功！');
+        } else {
+          await addDoc(collection(db, 'accommodations'), accommodationData);
+          setToastMsg('保存成功！');
+        }
+        
+        // 清空表单
+        setName('');
+        setAddress('');
+        setCheckIn('');
+        setCheckOut('');
+        setPrice('');
+        setRange(undefined);
+        setNote('');
+        setImages(null);
+        setPreviewUrls([]);
+        setSelectedAccommodation(null);
+        
         setToastOpen(true);
-      } else {
-        await addDoc(collection(db, 'accommodations'), accommodationData);
-        setToastMsg('保存成功！');
+      } catch (dbError: any) {
+        console.error('数据库保存失败:', dbError);
+        setError('データの保存に失敗しました。');
+        setToastMsg('データの保存に失敗しました。');
         setToastOpen(true);
       }
-      setName('');
-      setAddress('');
-      setCheckIn('');
-      setCheckOut('');
-      setPrice('');
-      setRange(undefined);
-      setNote('');
-      setImages(null);
-      setPreviewUrls([]);
     } catch (err: any) {
+      console.error('保存失败', err);
       setError('保存に失敗しました。');
+      setToastMsg('保存に失敗しました。');
+      setToastOpen(true);
     } finally {
       setLoading(false);
     }
@@ -378,60 +493,54 @@ const AccommodationForm: React.FC = () => {
     window.open('https://www.airbnb.jp/', '_blank');
   };
 
+  // 如果未登录，显示加载状态
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-lg text-gray-600">ログイン中...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col items-center py-6">
-    <div className="w-full max-w-6xl bg-white rounded-xl shadow p-8 flex flex-col gap-4">
-      <div className="flex items-center -mt-2 -ml-3">
-        <img src="/bus.png" alt="logo" className="h-6 w-11 mr-3" />
-        <span className="font-bold text-xl mr-8">Live Bus Planner</span>
-      </div>
-      <div className="flex justify-start mb-8 mt-4">
-        <ProjectTabs />
-      </div>
-        <div className="w-full mb-4 -mt-2">
-          <label className="block text-base mb-2 font-semibold">保存済みの宿泊先</label>
-          <Listbox value={selectedAccommodation || ''} onChange={handleAccommodationSelect}>
-            <div className="relative">
-              <Listbox.Button className="relative w-full h-12 bg-white border border-gray-300 rounded-lg py-2 pl-4 pr-10 text-left focus:outline-none focus:ring-2 focus:ring-pink-400 transition text-base">
-                <span className="block truncate">
-                  {selectedAccommodation 
-                    ? savedAccommodations.find(acc => acc.id === selectedAccommodation)?.accommodationName 
-                    : '新しい宿泊先を作成'}
-                </span>
-                <span className="absolute inset-y-0 right-0 flex items-center pr-2">
-                  <ChevronUpDownIcon className="h-5 w-5 text-gray-400" aria-hidden="true" />
-                </span>
-              </Listbox.Button>
-              <Transition
-                enter="transition duration-100 ease-out"
-                enterFrom="transform scale-95 opacity-0"
-                enterTo="transform scale-100 opacity-100"
-                leave="transition duration-75 ease-out"
-                leaveFrom="transform scale-100 opacity-100"
-                leaveTo="transform scale-95 opacity-0"
-              >
-                <Listbox.Options className="absolute z-10 w-full mt-1 bg-white rounded-lg shadow-lg max-h-60 overflow-auto focus:outline-none">
-                  <Listbox.Option
-                    key="new"
-                    value=""
-                    className={({ active }) =>
-                      `relative cursor-pointer select-none py-2 pl-4 pr-9 ${
-                        active ? 'bg-pink-100 text-pink-900' : 'text-gray-900'
-                      }`
-                    }
-                  >
-                    {({ selected }) => (
-                      <>
-                        <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
-                          新しい宿泊先を作成
-                        </span>
-                      </>
-                    )}
-                  </Listbox.Option>
-                  {savedAccommodations.map((accommodation) => (
+      <div className="w-full max-w-6xl bg-white rounded-xl shadow p-8 flex flex-col gap-4">
+        <div className="flex items-center -mt-2 -ml-3">
+          <img src="/bus.png" alt="logo" className="h-6 w-11 mr-3" />
+          <span className="font-bold text-xl mr-8">Live Bus Planner</span>
+        </div>
+        <div className="flex justify-start mb-8 mt-4">
+          <ProjectTabs />
+        </div>
+        <form id="accommodation-form" onSubmit={handleSubmit} className="contents">
+          <div className="w-full mb-4 -mt-2">
+            <label className="block text-base mb-2 font-semibold">保存済みの宿泊先</label>
+            <Listbox value={selectedAccommodation || ''} onChange={handleAccommodationSelect}>
+              <div className="relative">
+                <Listbox.Button className="relative w-full h-12 bg-white border border-gray-300 rounded-lg py-2 pl-4 pr-10 text-left focus:outline-none focus:ring-2 focus:ring-pink-400 transition text-base">
+                  <span className="block truncate">
+                    {selectedAccommodation 
+                      ? savedAccommodations.find(acc => acc.id === selectedAccommodation)?.accommodationName 
+                      : '新しい宿泊先を作成'}
+                  </span>
+                  <span className="absolute inset-y-0 right-0 flex items-center pr-2">
+                    <ChevronUpDownIcon className="h-5 w-5 text-gray-400" aria-hidden="true" />
+                  </span>
+                </Listbox.Button>
+                <Transition
+                  enter="transition duration-100 ease-out"
+                  enterFrom="transform scale-95 opacity-0"
+                  enterTo="transform scale-100 opacity-100"
+                  leave="transition duration-75 ease-out"
+                  leaveFrom="transform scale-100 opacity-100"
+                  leaveTo="transform scale-95 opacity-0"
+                >
+                  <Listbox.Options className="absolute z-10 w-full mt-1 bg-white rounded-lg shadow-lg max-h-60 overflow-auto focus:outline-none">
                     <Listbox.Option
-                      key={accommodation.id}
-                      value={accommodation.id}
+                      key="new"
+                      value=""
                       className={({ active }) =>
                         `relative cursor-pointer select-none py-2 pl-4 pr-9 ${
                           active ? 'bg-pink-100 text-pink-900' : 'text-gray-900'
@@ -441,130 +550,148 @@ const AccommodationForm: React.FC = () => {
                       {({ selected }) => (
                         <>
                           <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
-                            {(accommodation.fromDate && accommodation.toDate) ?
-                              (() => {
-                                const from = accommodation.fromDate.toDate ? accommodation.fromDate.toDate() : new Date(accommodation.fromDate.seconds * 1000);
-                                const to = accommodation.toDate.toDate ? accommodation.toDate.toDate() : new Date(accommodation.toDate.seconds * 1000);
-                                return `${from.getFullYear()}/${(from.getMonth()+1).toString().padStart(2,'0')}/${from.getDate().toString().padStart(2,'0')} - ${to.getFullYear()}/${(to.getMonth()+1).toString().padStart(2,'0')}/${to.getDate().toString().padStart(2,'0')} ${accommodation.name || ''}`;
-                              })()
-                              : accommodation.accommodationName}
+                            新しい宿泊先を作成
                           </span>
                         </>
                       )}
                     </Listbox.Option>
-                  ))}
-                </Listbox.Options>
-              </Transition>
-            </div>
-          </Listbox>
-          {selectedAccommodation && (
-            <button type="button" onClick={handleDelete} className="mt-2 bg-red-500 hover:bg-red-600 text-white text-xs rounded px-3 py-1">削除</button>
-          )}
-        </div>
-        <div className="grid grid-cols-3 gap-3 mx-auto">
-          <div className="flex flex-col items-start -ml-2 mt-3">
-            <div className="bg-pink-100 rounded-2xl flex flex-col items-center justify-center p-4 w-[320px] h-[260px] mb-9">
-              <label className="flex flex-col items-center cursor-pointer w-full h-full justify-center">
-                <span className="text-6xl text-pink-500 mb-2">＋</span>
-                <input type="file" multiple accept="image/*" onChange={handleImageChange} className="hidden" />
-                <span className="text-base text-pink-700">画像アップロード</span>
-              </label>
-              {previewUrls.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2 w-full justify-start">
-                  {previewUrls.map((url, idx) => (
-                    <div key={idx} className="relative group">
-                      <img 
-                        src={url} 
-                        alt="preview" 
-                        className="w-12 h-12 object-cover rounded border cursor-pointer hover:opacity-80 transition-opacity" 
-                        onClick={() => handlePreviewImage(url)}
-                      />
-                      <button
-                        onClick={() => handleDeleteImage(idx)}
-                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    {savedAccommodations.map((accommodation) => (
+                      <Listbox.Option
+                        key={accommodation.id}
+                        value={accommodation.id}
+                        className={({ active }) =>
+                          `relative cursor-pointer select-none py-2 pl-4 pr-9 ${
+                            active ? 'bg-pink-100 text-pink-900' : 'text-gray-900'
+                          }`
+                        }
                       >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+                        {({ selected }) => (
+                          <>
+                            <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
+                              {(accommodation.fromDate && accommodation.toDate) ?
+                                (() => {
+                                  const from = accommodation.fromDate.toDate ? accommodation.fromDate.toDate() : new Date(accommodation.fromDate.seconds * 1000);
+                                  const to = accommodation.toDate.toDate ? accommodation.toDate.toDate() : new Date(accommodation.toDate.seconds * 1000);
+                                  return `${from.getFullYear()}/${(from.getMonth()+1).toString().padStart(2,'0')}/${from.getDate().toString().padStart(2,'0')} - ${to.getFullYear()}/${(to.getMonth()+1).toString().padStart(2,'0')}/${to.getDate().toString().padStart(2,'0')} ${accommodation.name || ''}`;
+                                })()
+                                : accommodation.accommodationName}
+                            </span>
+                          </>
+                        )}
+                      </Listbox.Option>
+                    ))}
+                  </Listbox.Options>
+                </Transition>
+              </div>
+            </Listbox>
+            {selectedAccommodation && (
+              <button type="button" onClick={handleDelete} className="mt-2 bg-red-500 hover:bg-red-600 text-white text-xs rounded px-3 py-1">削除</button>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-3 mx-auto">
+            <div className="flex flex-col items-start -ml-2 mt-3">
+              <div className="bg-pink-100 rounded-2xl flex flex-col items-center justify-center p-4 w-[320px] h-[260px] mb-9">
+                <label className="flex flex-col items-center cursor-pointer w-full h-full justify-center">
+                  <span className="text-6xl text-pink-500 mb-2">＋</span>
+                  <input type="file" multiple accept="image/*" onChange={handleImageChange} className="hidden" />
+                  <span className="text-base text-pink-700">画像アップロード</span>
+                </label>
+                {previewUrls.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2 w-full justify-start">
+                    {previewUrls.map((url, idx) => (
+                      <div key={idx} className="relative group">
+                        <img 
+                          src={url} 
+                          alt="preview" 
+                          className="w-12 h-12 object-cover rounded border cursor-pointer hover:opacity-80 transition-opacity" 
+                          onClick={() => handlePreviewImage(url)}
+                        />
+                        <button
+                          onClick={() => handleDeleteImage(idx)}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button 
+                type="button" 
+                onClick={handleAirbnb} 
+                className="bg-[#FF5A5F] hover:bg-[#FF5A5F]/90 text-white font-bold rounded-[4px] w-[320px] h-24 text-xl flex flex-col items-center justify-center shadow"
+              >
+                <span>Airbnb</span>
+                <span className="text-base mt-1">宿泊先検索</span>
+              </button>
             </div>
+
+            <div className="flex flex-col items-start">
+              <div className="w-full max-w-[360px] mb-2">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-base mb-1 font-semibold">チェックイン時間</label>
+                    <input type="time" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className="w-full h-12 border border-gray-300 rounded-[4px] px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400 transition text-base placeholder-gray-400" />
+                  </div>
+                  <div>
+                    <label className="block text-base mb-1 font-semibold">チェックアウト時間</label>
+                    <input type="time" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} className="w-full h-12 border border-gray-300 rounded-[4px] px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400 transition text-base placeholder-gray-400" />
+                  </div>
+                  <div>
+                    <label className="block text-base mb-1 font-semibold">宿泊施設名</label>
+                    <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full h-12 border border-gray-300 rounded-[4px] px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400 transition text-base placeholder-gray-400" placeholder="例：ホテル〇〇" />
+                  </div>
+                  <div>
+                    <label className="block text-base mb-1 font-semibold">住所</label>
+                    <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full h-12 border border-gray-300 rounded-[4px] px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400 transition text-base placeholder-gray-400" placeholder="例：東京都渋谷区..." />
+                  </div>
+                </div>
+              </div>
+              <div className="w-full max-w-[420px] bg-pink-50 rounded-lg p-6 flex flex-col gap-4 shadow min-h-[80px] items-start">
+                <div className="w-full">
+                  <label className="block text-base mb-1 font-semibold">宿泊料金</label>
+                  <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-12 border border-gray-300 rounded-[4px] px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400 transition text-base placeholder-gray-400" placeholder="例：8000" />
+                </div>
+                <div className="w-full">
+                  <label className="block text-base mb-1 font-semibold">メモ</label>
+                  <textarea value={note} onChange={(e) => setNote(e.target.value)} onClick={() => setIsNoteExpanded(true)} onBlur={() => { if (!note) setIsNoteExpanded(false); }} onMouseUp={() => { if (!note) setIsNoteExpanded(false); }} className={`w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400 transition-all duration-200 text-base placeholder-gray-400 resize-none ${isNoteExpanded ? 'h-24' : 'h-12'}`} placeholder="特記事項があれば入力してください" />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col items-start w-[320px] justify-center ml-10">
+              <div className="w-full bg-gray-50 rounded-lg p-6 mb-4 flex items-center justify-center gap-2 border text-sm font-semibold">
+                <span className="text-gray-600">
+                  <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
+                    <path stroke="#FF5A5F" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10m-9 8h10m-9-4h6m-7 8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6Z"/>
+                  </svg>
+                </span>
+                <span className="text-gray-700 text-sm">
+                  {range?.from ? range.from.toLocaleDateString() : '----/--/--'}
+                  {range?.to ? ` - ${range.to.toLocaleDateString()}` : ''}
+                </span>
+              </div>
+              <div className="bg-white rounded-2xl shadow p-1 mb-6 w-full">
+                <DayPicker
+                  mode="range"
+                  selected={range}
+                  onSelect={setRange}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-between mt-6">
             <button 
-              type="button" 
-              onClick={handleAirbnb} 
-              className="bg-[#FF5A5F] hover:bg-[#FF5A5F]/90 text-white font-bold rounded-[4px] w-[320px] h-24 text-xl flex flex-col items-center justify-center shadow"
+              type="submit"
+              className="ml-auto bg-[#FF5A5F] hover:bg-[#FF5A5F]/90 text-white font-bold rounded-[4px] w-48 h-14 text-lg shadow -mt-6"
+              disabled={loading}
             >
-              <span>Airbnb</span>
-              <span className="text-base mt-1">宿泊先検索</span>
+              {loading ? '保存中...' : '保存'}
             </button>
           </div>
-
-          <div className="flex flex-col items-start">
-            <div className="w-full max-w-[360px] mb-2">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-base mb-1 font-semibold">チェックイン時間</label>
-                  <input type="time" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className="w-full h-12 border border-gray-300 rounded-[4px] px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400 transition text-base placeholder-gray-400" />
-                </div>
-                <div>
-                  <label className="block text-base mb-1 font-semibold">チェックアウト時間</label>
-                  <input type="time" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} className="w-full h-12 border border-gray-300 rounded-[4px] px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400 transition text-base placeholder-gray-400" />
-                </div>
-                <div>
-                  <label className="block text-base mb-1 font-semibold">宿泊施設名</label>
-                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full h-12 border border-gray-300 rounded-[4px] px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400 transition text-base placeholder-gray-400" placeholder="例：ホテル〇〇" />
-                </div>
-                <div>
-                  <label className="block text-base mb-1 font-semibold">住所</label>
-                  <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full h-12 border border-gray-300 rounded-[4px] px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400 transition text-base placeholder-gray-400" placeholder="例：東京都渋谷区..." />
-                </div>
-              </div>
-            </div>
-            <div className="w-full max-w-[420px] bg-pink-50 rounded-lg p-6 flex flex-col gap-4 shadow min-h-[80px] items-start">
-              <div className="w-full">
-                <label className="block text-base mb-1 font-semibold">宿泊料金</label>
-                <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-12 border border-gray-300 rounded-[4px] px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400 transition text-base placeholder-gray-400" placeholder="例：8000" />
-              </div>
-              <div className="w-full">
-                <label className="block text-base mb-1 font-semibold">メモ</label>
-                <textarea value={note} onChange={(e) => setNote(e.target.value)} onClick={() => setIsNoteExpanded(true)} onBlur={() => { if (!note) setIsNoteExpanded(false); }} onMouseUp={() => { if (!note) setIsNoteExpanded(false); }} className={`w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400 transition-all duration-200 text-base placeholder-gray-400 resize-none ${isNoteExpanded ? 'h-24' : 'h-12'}`} placeholder="特記事項があれば入力してください" />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-col items-start w-[320px] justify-center ml-10">
-            <div className="w-full bg-gray-50 rounded-lg p-6 mb-4 flex items-center justify-center gap-2 border text-sm font-semibold">
-              <span className="text-gray-600">
-                <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
-                  <path stroke="#FF5A5F" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10m-9 8h10m-9-4h6m-7 8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6Z"/>
-                </svg>
-              </span>
-              <span className="text-gray-700 text-sm">
-                {range?.from ? range.from.toLocaleDateString() : '----/--/--'}
-                {range?.to ? ` - ${range.to.toLocaleDateString()}` : ''}
-              </span>
-            </div>
-            <div className="bg-white rounded-2xl shadow p-1 mb-6 w-full">
-              <DayPicker
-                mode="range"
-                selected={range}
-                onSelect={setRange}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="flex justify-between mt-6">
-          <button 
-            type="submit" 
-            form="accommodation-form" 
-            className="ml-auto bg-[#FF5A5F] hover:bg-[#FF5A5F]/90 text-white font-bold rounded-[4px] w-48 h-14 text-lg shadow -mt-6"
-          >
-            保存
-          </button>
-        </div>
-        <form id="accommodation-form" className="hidden" onSubmit={handleSubmit}></form>
+        </form>
         {toastOpen && (
           <div className={`fixed top-6 right-6 z-50 px-6 py-3 rounded shadow-lg flex items-center animate-fade-in-out ${toastMsg.includes('削除成功') ? 'bg-red-500' : (toastMsg.includes('失敗') || error) ? 'bg-red-500' : 'bg-green-500'} text-white`}>
             {(toastMsg.includes('失敗') || error) ? (

@@ -10,6 +10,14 @@ service firebase.storage {
                    && request.resource.contentType.matches('image/.*');  // 只允许图片文件
     }
     
+    // 允许已认证用户访问 accommodation_images 目录
+    match /accommodation_images/{imageId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null 
+                   && request.resource.size < 5 * 1024 * 1024  // 限制文件大小为 5MB
+                   && request.resource.contentType.matches('image/.*');  // 只允许图片文件
+    }
+    
     // 默认拒绝所有其他访问
     match /{allPaths=**} {
       allow read, write: if false;

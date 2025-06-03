@@ -1,0 +1,12 @@
+specVersion: "v1"
+serviceId: "livebus_planner"
+location: "asia-northeast2"
+schema:
+  source: "./schema"
+  datasource:
+    postgresql:
+      database: "fdcdb"
+      cloudSql:
+        instanceId: "livebus_planner-fdc"
+      # schemaValidation: "COMPATIBLE"
+connectorDirs: ["./connector"]

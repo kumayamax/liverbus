@@ -56,40 +56,88 @@ const COLORS = ['#4FC3F7', '#FFD54F', '#F06292', '#BA68C8'];
 
 function DatePickerWithRange({ className, date, setDate }: { className?: string, date: DateRange | undefined, setDate: (d: DateRange | undefined) => void }) {
   const [open, setOpen] = React.useState(false);
+
+  // 点击外部关闭日历
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.date-picker-container')) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   return (
-    <div className={cn("grid gap-2 -mt-8", className)}>
+    <div className={cn("grid gap-2 -mt-8 date-picker-container", className)}>
       <button
         id="date"
         type="button"
         className={cn(
-          "w-[300px] justify-start text-left font-normal flex items-center border border-gray-300 rounded px-3 py-2 bg-white hover:bg-gray-50 transition",
-          !date && "text-muted-foreground"
+          "w-[300px] justify-start text-left font-normal flex items-center border border-gray-300 rounded-lg px-3 py-2 bg-white hover:bg-gray-50 transition-all duration-200 -mt-8",
+          !date && "text-muted-foreground",
+          open && "ring-2 ring-green-400 border-green-400"
         )}
         onClick={() => setOpen((v) => !v)}
       >
-        <CalendarIcon className="mr-4" />
+        <CalendarIcon className="mr-4 h-5 w-5 text-gray-500" />
         {date?.from ? (
           date.to ? (
             <>
-              {format(date.from, "LLL dd, y")} -{" "}
-              {format(date.to, "LLL dd, y")}
+              {format(date.from, "yyyy/MM/dd")} -{" "}
+              {format(date.to, "yyyy/MM/dd")}
             </>
           ) : (
-            format(date.from, "LLL dd, y")
+            format(date.from, "yyyy/MM/dd")
           )
         ) : (
           <span>日付を選択</span>
         )}
       </button>
       {open && (
-        <div className="absolute z-50 bg-white border rounded shadow p-2 mt-12 w-[640px] min-w-[390px] overflow-hidden">
+        <div className="absolute z-50 bg-white border rounded-2xl shadow-xl p-4 mt-2 min-w-[360px] max-w-[95vw] animate-in fade-in-0 zoom-in-95 mt-18 -ml-20">
           <Calendar
             initialFocus
             mode="range"
             defaultMonth={date?.from}
             selected={date}
-            onSelect={setDate}
+            onSelect={(newDate) => {
+              setDate(newDate);
+              if (newDate?.from && newDate?.to) {
+                setOpen(false);
+              }
+            }}
             numberOfMonths={2}
+            className="rounded-2xl"
+            classNames={{
+              months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
+              month: "space-y-4",
+              caption: "flex justify-center pt-1 relative items-center",
+              caption_label: "text-sm font-medium",
+              nav: "space-x-1 flex items-center",
+              nav_button: cn(
+                "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100 hover:bg-gray-100 rounded-full transition-colors"
+              ),
+              nav_button_previous: "absolute left-1",
+              nav_button_next: "absolute right-1",
+              table: "w-full border-collapse space-y-1",
+              head_row: "flex",
+              head_cell: "text-gray-500 rounded-md w-9 font-normal text-[0.8rem]",
+              row: "flex w-full mt-2",
+              cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-gray-100/50 [&:has([aria-selected])]:bg-gray-100 first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
+              day: cn(
+                "h-9 w-9 p-0 font-normal aria-selected:opacity-100 hover:bg-gray-100 rounded-full transition-colors"
+              ),
+              day_range_end: "day-range-end",
+              day_selected: "bg-green-500 text-white hover:bg-green-600 hover:text-white focus:bg-green-500 focus:text-white",
+              day_today: "bg-gray-100 text-gray-900",
+              day_outside: "day-outside text-gray-400 opacity-50 aria-selected:bg-gray-100 aria-selected:text-gray-400 aria-selected:opacity-30",
+              day_disabled: "text-gray-400 opacity-50",
+              day_range_middle: "aria-selected:bg-gray-100 aria-selected:text-gray-900",
+              day_hidden: "invisible",
+            }}
           />
         </div>
       )}

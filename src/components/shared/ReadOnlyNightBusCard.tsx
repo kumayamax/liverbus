@@ -1,5 +1,5 @@
-import React from 'react';
-import { Card } from '../ui/card';
+import React, { useState } from 'react';
+import { DayPicker } from 'react-day-picker';
 
 interface Trip {
   id: string;
@@ -22,83 +22,131 @@ interface ReadOnlyNightBusCardProps {
 }
 
 const ReadOnlyNightBusCard: React.FC<ReadOnlyNightBusCardProps> = ({ trip }) => {
+  const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+  const from = trip.fromDate ? new Date(trip.fromDate.seconds * 1000) : undefined;
+  const to = trip.toDate ? new Date(trip.toDate.seconds * 1000) : undefined;
   return (
-    <Card className="p-6 rounded-2xl shadow-md border">
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-100 p-2 rounded-lg">
-              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold">{trip.tripName || `${trip.fromStation || ''}→${trip.toStation || ''}`}</h3>
-              <p className="text-sm text-gray-500">
-                {trip.fromDate && trip.toDate
-                  ? `${new Date(trip.fromDate.seconds * 1000).toLocaleDateString()} - ${new Date(trip.toDate.seconds * 1000).toLocaleDateString()}`
-                  : ''}
-              </p>
-            </div>
+    <div className="flex flex-col md:flex-row gap-12 p-8 items-center bg-gray-50 rounded-3xl shadow-xl border border-gray-200">
+      {/* 左：图片区（加宽） */}
+      <div className="bg-blue-100 rounded-3xl flex flex-col items-center justify-center p-6 w-full md:w-[300px] min-h-[400px] shadow-sm">
+        {trip.images && trip.images.length > 0 ? (
+          <div className="flex flex-wrap gap-3 w-full justify-center">
+            {trip.images.map((url, idx) => (
+              <img
+                key={idx}
+                src={url}
+                alt="preview"
+                className="w-24 h-24 object-cover rounded-xl border border-blue-200 shadow cursor-pointer"
+                onClick={() => setPreviewIdx(idx)}
+              />
+            ))}
           </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <p className="text-sm text-gray-500">出発時間</p>
-            <p className="font-medium">{trip.from}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">到着時間</p>
-            <p className="font-medium">{trip.to}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">出発地駅名</p>
-            <p className="font-medium">{trip.fromStation}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">到着地駅名</p>
-            <p className="font-medium">{trip.toStation}</p>
-          </div>
-        </div>
-
-        <div className="bg-blue-50 rounded-lg p-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-sm text-gray-500">夜行バス名</p>
-              <p className="font-medium">{trip.busName}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">夜行バス料金</p>
-              <p className="font-medium">¥{trip.busPrice.toLocaleString()}</p>
-            </div>
-          </div>
-        </div>
-
-        {trip.note && (
-          <div>
-            <p className="text-sm text-gray-500 mb-1">メモ</p>
-            <p className="text-sm bg-gray-50 p-3 rounded-lg">{trip.note}</p>
-          </div>
+        ) : (
+          <span className="text-7xl text-blue-400 mb-2">＋</span>
         )}
-
-        {trip.images && trip.images.length > 0 && (
-          <div>
-            <p className="text-sm text-gray-500 mb-2">画像</p>
-            <div className="grid grid-cols-4 gap-2">
-              {trip.images.map((image, index) => (
-                <img
-                  key={index}
-                  src={image}
-                  alt={`Trip image ${index + 1}`}
-                  className="w-full h-24 object-cover rounded-lg"
-                />
-              ))}
-            </div>
+        <span className="text-lg font-bold text-blue-700 mt-4 tracking-wide">画像</span>
+      </div>
+      {/* 预览模态框 */}
+      {previewIdx !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60" onClick={() => setPreviewIdx(null)}>
+          <div className="relative" onClick={e => e.stopPropagation()}>
+            <img
+              src={trip.images[previewIdx]}
+              alt="preview-large"
+              className="max-w-[90vw] max-h-[80vh] rounded-2xl shadow-2xl border-4 border-white"
+            />
+            {/* 关闭按钮 */}
+            <button
+              className="absolute top-2 right-2 bg-white bg-opacity-80 rounded-full p-2 shadow hover:bg-opacity-100"
+              onClick={() => setPreviewIdx(null)}
+            >
+              <svg width="24" height="24" fill="none" viewBox="0 0 24 24"><path d="M6 6l12 12M6 18L18 6" stroke="#333" strokeWidth="2" strokeLinecap="round"/></svg>
+            </button>
+            {/* 多图切换 */}
+            {trip.images.length > 1 && (
+              <>
+                <button
+                  className="absolute left-2 top-1/2 -translate-y-1/2 bg-white bg-opacity-80 rounded-full p-2 shadow hover:bg-opacity-100"
+                  onClick={() => setPreviewIdx((previewIdx - 1 + trip.images.length) % trip.images.length)}
+                >
+                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" stroke="#333" strokeWidth="2" strokeLinecap="round"/></svg>
+                </button>
+                <button
+                  className="absolute right-2 top-1/2 -translate-y-1/2 bg-white bg-opacity-80 rounded-full p-2 shadow hover:bg-opacity-100"
+                  onClick={() => setPreviewIdx((previewIdx + 1) % trip.images.length)}
+                >
+                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" stroke="#333" strokeWidth="2" strokeLinecap="round"/></svg>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      {/* 中：信息区（分组优化） */}
+      <div className="flex-1 flex flex-col justify-center min-w-0 gap-10 ml-5">
+        {/* 时间信息 */}
+        <div className="flex flex-row gap-10">
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold text-gray-600 mb-1">出発時間</span>
+            <span className="bg-white rounded-xl px-5 py-2 shadow text-xl font-bold min-w-[100px] text-gray-800 text-left">{trip.from}</span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold text-gray-600 mb-1">到着時間</span>
+            <span className="bg-white rounded-xl px-5 py-2 shadow text-xl font-bold min-w-[100px] text-gray-800 text-left">{trip.to}</span>
+          </div>
+        </div>
+        {/* 车站信息 */}
+        <div className="flex flex-row gap-10">
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold text-gray-600 mb-1">出発地駅名</span>
+            <span className="bg-white rounded-xl px-5 py-2 shadow text-xl font-bold min-w-[100px] text-gray-800 text-left">{trip.fromStation}</span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold text-gray-600 mb-1">到着地駅名</span>
+            <span className="bg-white rounded-xl px-5 py-2 shadow text-xl font-bold min-w-[100px] text-gray-800 text-left">{trip.toStation}</span>
+          </div>
+        </div>
+        {/* 巴士信息 */}
+        <div className="flex flex-row gap-10">
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold text-gray-600 mb-1">夜行バス名</span>
+            <span className="bg-blue-50 rounded-xl px-5 py-2 shadow text-xl font-bold min-w-[100px] text-blue-700 text-left">{trip.busName}</span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold text-gray-600 mb-1">夜行バス料金</span>
+            <span className="bg-blue-50 rounded-xl px-5 py-2 shadow text-xl font-bold min-w-[100px] text-blue-700 text-left">¥{trip.busPrice.toLocaleString()}</span>
+          </div>
+        </div>
+        {/* 备注信息 */}
+        {trip.note && (
+          <div className="flex flex-col mt-2">
+            <span className="text-sm font-semibold text-gray-600 mb-1">メモ</span>
+            <span className="bg-gray-100 rounded-xl px-5 py-2 shadow text-base min-w-[100px] text-gray-700 text-left">{trip.note}</span>
           </div>
         )}
       </div>
-    </Card>
+      {/* 右：日历区（加宽，恢复 items-center） */}
+      <div className="flex flex-col items-center justify-center w-full md:w-[330px]">
+        <div className="w-full bg-white rounded-2xl p-6 mb-6 flex items-center justify-center gap-3 border border-blue-100 shadow text-base font-semibold ">
+          <span className="text-blue-500">
+            <svg width="22" height="22" fill="none" viewBox="0 0 24 24"><path stroke="#2563eb" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10m-9 8h10m-9-4h6m-7 8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6Z"/></svg>
+          </span>
+          <span className="text-gray-700 text-base">
+            {from ? from.toLocaleDateString() : '----/--/--'}
+            {to ? ` - ${to.toLocaleDateString()}` : ''}
+          </span>
+        </div>
+        <div className="bg-gray-50 rounded-3xl shadow-lg p-2 w-full">
+          <DayPicker
+            mode="range"
+            selected={{ from, to }}
+            showOutsideDays
+            disabled
+            className="!rounded-2xl !border-0 !shadow-none"
+          />
+        </div>
+      </div>
+    </div>
   );
 };
 

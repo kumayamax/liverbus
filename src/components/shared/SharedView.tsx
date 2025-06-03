@@ -68,8 +68,8 @@ export default function SharedView() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col items-center py-6">
-      <div className="w-full max-w-6xl bg-white rounded-xl shadow p-8 flex flex-col gap-4">
+    <div className="flex flex-col items-center bg-gray-100 min-h-screen py-8">
+      <div className="w-full max-w-6xl mx-auto flex flex-col gap-10 bg-white rounded-2xl shadow p-8">
         <div className="flex items-center -mt-2 -ml-3">
           <img src="/bus.png" alt="logo" className="h-6 w-11 mr-3" />
           <span className="font-bold text-xl mr-8">Live Bus Planner</span>
@@ -94,7 +94,7 @@ export default function SharedView() {
             ))}
           </Menubar>
         </div>
-        <div className="grid grid-cols-1 gap-6">
+        <div className="flex flex-col gap-10 w-full">
           {activeTab === 'nightbus' && nightBuses.map(trip => (
             <ReadOnlyNightBusCard key={trip.id} trip={trip} />
           ))}
