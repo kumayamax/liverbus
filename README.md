@@ -35,6 +35,7 @@ Live Bus Planner は、ライブ・コンサート参加のための総合予算
 6. 必要に応じて予算プランを共有
 
    デモアカウント（Demo Account）  anshazhe99@gmail.com
+
    デモパスワード（Demo Password） 123456789
 
 ## セキュリティ
